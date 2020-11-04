@@ -221,7 +221,7 @@ private fun GraphQLParser.FragmentDefinitionContext.parse(): GQLFragmentDefiniti
       name = fragmentName().text,
       directives = directives().parse(),
       typeCondition = typeCondition().namedType().parse(),
-      selections = selectionSet().parse()
+      selectionSet = selectionSet().parse()
   )
 }
 
@@ -232,7 +232,7 @@ private fun GraphQLParser.OperationDefinitionContext.parse(): GQLOperationDefini
       name = name()?.text,
       variableDefinitions = variableDefinitions().parse(),
       directives = directives().parse(),
-      selections = selectionSet().parse()
+      selectionSet = selectionSet().parse()
   )
 }
 
@@ -256,7 +256,7 @@ private fun GraphQLParser.InlineFragmentContext.parse(): GQLInlineFragment {
       sourceLocation = SourceLocation(start),
       typeCondition = typeCondition().namedType().parse(),
       directives = directives().parse(),
-      selections = selectionSet().parse()
+      selectionSet = selectionSet().parse()
   )
 }
 
@@ -267,7 +267,7 @@ private fun GraphQLParser.FieldContext.parse(): GQLField {
       name = name().text,
       arguments = arguments().parse(),
       directives = directives().parse(),
-      selections = selectionSet().parse()
+      selectionSet = selectionSet()?.parse()
   )
 }
 
@@ -284,7 +284,6 @@ private fun GraphQLParser.FieldDefinitionContext.parse(): GQLFieldDefinition {
 
 private fun GraphQLParser.ArgumentsContext?.parse() = this?.argument()?.map { it.parse() } ?: emptyList()
 private fun GraphQLParser.DirectivesContext?.parse() = this?.directive()?.map { it.parse() } ?: emptyList()
-private fun GraphQLParser.SelectionSetContext?.parse() = this?.selection()?.map { it.parse() } ?: emptyList()
 private fun GraphQLParser.VariableDefinitionsContext?.parse() = this?.variableDefinition()?.map { it.parse() } ?: emptyList()
 private fun GraphQLParser.ImplementsInterfacesContext?.parse() = this?.implementsInterface()?.map { it.parse() } ?: emptyList()
 private fun GraphQLParser.FieldsDefinitionContext?.parse() = this?.fieldDefinition()?.map { it.parse() } ?: emptyList()
@@ -294,6 +293,8 @@ private fun GraphQLParser.InputFieldsDefinitionContext?.parse() = this?.inputVal
 private fun GraphQLParser.EnumValuesDefinitionContext?.parse() = this?.enumValueDefinition()?.map { it.parse() } ?: emptyList()
 private fun GraphQLParser.OperationTypesDefinitionContext?.parse() = this?.operationTypeDefinition()?.map { it.parse() } ?: emptyList()
 private fun GraphQLParser.DirectiveLocationsContext?.parse() = this?.directiveLocation()?.map { it.parse() } ?: emptyList()
+
+private fun GraphQLParser.SelectionSetContext.parse() = GQLSelectionSet(this.selection()?.map { it.parse() } ?: emptyList(), SourceLocation(start))
 
 private fun GraphQLParser.OperationTypeDefinitionContext.parse(): GQLOperationTypeDefinition {
   return GQLOperationTypeDefinition(

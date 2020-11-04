@@ -195,7 +195,7 @@ operationDefinition
   ;
 
 selectionSet
-  : '{' (selection)* '}'
+  : '{' (selection)+ '}'
   ;
 
 description

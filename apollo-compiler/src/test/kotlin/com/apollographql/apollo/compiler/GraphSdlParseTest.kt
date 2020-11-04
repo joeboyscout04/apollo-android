@@ -2,7 +2,7 @@ package com.apollographql.apollo.compiler
 
 import com.apollographql.apollo.compiler.TestUtils.checkTestFixture
 import com.apollographql.apollo.compiler.parser.graphql.ast.GQLDocument
-import com.apollographql.apollo.compiler.parser.graphql.ast.fromFile
+import com.apollographql.apollo.compiler.parser.graphql.ast.parseAsSchema
 import com.apollographql.apollo.compiler.parser.graphql.ast.toDocument
 import com.apollographql.apollo.compiler.parser.graphql.ast.toFile
 import com.apollographql.apollo.compiler.parser.introspection.IntrospectionSchema
@@ -21,7 +21,7 @@ class GraphSdlParseTest() {
      * - leading/trailing spaces in descriptions
      * - defaultValue coercion
      */
-    val sdlSchema = GQLDocument.fromFile(File("src/test/sdl/schema.sdl"))
+    val sdlSchema = GQLDocument.parseAsSchema(File("src/test/sdl/schema.sdl"))
     val actualSchema = sdlSchema.toIntrospectionSchema().normalize()
     val expectedSchemaFile = File("src/test/sdl/schema.json")
     val actualSchemaFile = File("build/sdl-test/actual.json")
@@ -68,7 +68,7 @@ class GraphSdlParseTest() {
     sdlFile.parentFile.deleteRecursively()
     sdlFile.parentFile.mkdirs()
     initialSchema.toDocument().toFile(sdlFile)
-    val finalSchema = GQLDocument.fromFile(sdlFile).toIntrospectionSchema().normalize()
+    val finalSchema = GQLDocument.parseAsSchema(sdlFile).toIntrospectionSchema().normalize()
 
     dumpSchemas(initialSchema, finalSchema)
     assertEquals(initialSchema, finalSchema)

@@ -4,6 +4,7 @@ import com.apollographql.apollo.compiler.parser.antlr.GraphQLLexer
 import com.apollographql.apollo.compiler.parser.antlr.GraphQLParser
 import com.apollographql.apollo.compiler.parser.error.DocumentParseException
 import com.apollographql.apollo.compiler.parser.error.ParseException
+import com.apollographql.apollo.compiler.parser.introspection.IntrospectionSchema
 import okio.Buffer
 import okio.BufferedSink
 import okio.buffer
@@ -17,7 +18,6 @@ import org.antlr.v4.runtime.Token
 import org.antlr.v4.runtime.atn.PredictionMode
 import java.io.File
 import java.io.InputStream
-import java.io.OutputStream
 
 fun GQLDocument.withBuiltinTypes(): GQLDocument {
   val buildInsInputStream = javaClass.getResourceAsStream("/builtins.sdl")
@@ -44,13 +44,15 @@ fun GQLDocument.withoutBuiltinTypes(): GQLDocument {
  */
 private fun GQLDocument.Companion.parseInternal(inputStream: InputStream, filePath: String = "(source)"): GQLDocument {
 
-  return GraphQLParser(
+  val parser = GraphQLParser(
       CommonTokenStream(
           GraphQLLexer(
               CharStreams.fromStream(inputStream)
           )
       )
-  ).apply {
+  )
+
+  return parser.apply {
     removeErrorListeners()
     interpreter.predictionMode = PredictionMode.SLL
     addErrorListener(
@@ -74,16 +76,35 @@ private fun GQLDocument.Companion.parseInternal(inputStream: InputStream, filePa
         }
     )
   }.document()
+      .also {
+        parser.checkEOF(it)
+      }
       .parse()
 }
 
-fun GQLDocument.Companion.fromString(document: String) = GQLDocument.fromInputStream(document.byteInputStream())
-
-fun GQLDocument.Companion.fromFile(file: File) = file.inputStream().use {
-  GQLDocument.fromInputStream(it, file.absolutePath)
+private fun GraphQLParser.checkEOF(documentContext: GraphQLParser.DocumentContext) {
+  val documentStopToken = documentContext.getStop()
+  val allTokens = (tokenStream as CommonTokenStream).tokens
+  if (documentStopToken != null && !allTokens.isNullOrEmpty()) {
+    val lastToken = allTokens[allTokens.size - 1]
+    val eof = lastToken.type == Token.EOF
+    val sameChannel = lastToken.channel == documentStopToken.channel
+    if (!eof && lastToken.tokenIndex > documentStopToken.tokenIndex && sameChannel) {
+      throw ParseException(
+          message = "Unsupported token `${lastToken.text}`",
+          token = lastToken
+      )
+    }
+  }
 }
 
-fun GQLDocument.Companion.fromInputStream(inputStream: InputStream, filePath: String = "(source)"): GQLDocument {
+fun GQLDocument.Companion.parseAsSchema(document: String) = GQLDocument.parseAsSchema(document.byteInputStream())
+
+fun GQLDocument.Companion.parseAsSchema(file: File) = file.inputStream().use {
+  GQLDocument.parseAsSchema(it, file.absolutePath)
+}
+
+fun GQLDocument.Companion.parseAsSchema(inputStream: InputStream, filePath: String = "(source)"): GQLDocument {
   // Validation as to be done before adding the built in types else validation fail on names starting with '__'
   // This means that it's impossible to add type extension on built in types at the moment
   return try {
@@ -98,6 +119,19 @@ fun GQLDocument.Companion.fromInputStream(inputStream: InputStream, filePath: St
     )
   }
 }
+
+fun GQLDocument.Companion.parseAsExecutable(inputStream: InputStream, introspectionSchema: IntrospectionSchema, filePath: String = "(source)"): GQLDocument {
+  return try {
+    parseInternal(inputStream, filePath)
+        .validateAsExecutable(introspectionSchema)
+  } catch (e: ParseException) {
+    throw DocumentParseException(
+        parseException = e,
+        filePath = filePath
+    )
+  }
+}
+
 
 private fun String.withIndents(): String {
   var indent = 0

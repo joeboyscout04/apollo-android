@@ -3,9 +3,44 @@ package com.apollographql.apollo.compiler.parser.graphql.ast
 import com.apollographql.apollo.compiler.ir.SourceLocation
 import okio.BufferedSink
 
+/**
+ * A node in the GraphQL AST.
+ *
+ * For simplicity, not all tokens are mapped to GQLNodes and simple tokens such as name or description are directly properties on their composite node.
+ *
+ * Whitespace tokens are not mapped to GQLNodes so this AST will not be able to preserve formatting upon modification.
+ */
 interface GQLNode {
   val sourceLocation: SourceLocation
+
+  /**
+   * The children of this node.
+   *
+   * Terminal nodes won't have any children.
+   */
+  val children: List<GQLNode>
   fun write(bufferedSink: BufferedSink)
+}
+
+/**
+ * depth first traversal
+ */
+fun GQLNode.visit(block: (GQLNode) -> Unit) {
+  block(this)
+  children.forEach {
+    it.visit(block)
+  }
+}
+
+/**
+ * depth first traversal
+ */
+inline fun <reified T : GQLNode> GQLNode.visitIsInstance(block: (T) -> Unit) {
+  (this as? T)?.let { block(it) }
+
+  children.filterIsInstance<T>().forEach {
+    block(it)
+  }
 }
 
 interface GQLNamed {
@@ -16,10 +51,11 @@ interface GQLDefinition : GQLNode
 interface GQLTypeSystemExtension : GQLNode
 interface GQLTypeExtension : GQLTypeSystemExtension, GQLNamed
 
-interface GQLSelection : GQLNode
+sealed class GQLSelection : GQLNode
 
 data class GQLDocument(val definitions: List<GQLDefinition>) : GQLNode {
   override val sourceLocation: SourceLocation = SourceLocation.UNKNOWN
+  override val children = definitions
 
   override fun write(bufferedSink: BufferedSink) {
     definitions.join(bufferedSink = bufferedSink, separator = "\n")
@@ -34,8 +70,10 @@ data class GQLOperationDefinition(
     val name: String?,
     val variableDefinitions: List<GQLVariableDefinition>,
     val directives: List<GQLDirective>,
-    val selections: List<GQLSelection>
+    val selectionSet: GQLSelectionSet
 ) : GQLDefinition {
+  override val children = variableDefinitions + directives + selectionSet
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       writeUtf8(operationType)
@@ -48,7 +86,7 @@ data class GQLOperationDefinition(
       }
       directives.join(bufferedSink)
       writeUtf8(" ")
-      selections.join(bufferedSink, prefix = "{", separator = "\n", postfix = "\n}")
+      selectionSet.write(bufferedSink)
     }
   }
 }
@@ -58,8 +96,11 @@ data class GQLFragmentDefinition(
     val name: String,
     val directives: List<GQLDirective>,
     val typeCondition: GQLNamedType,
-    val selections: List<GQLSelection>
+    val selectionSet: GQLSelectionSet
 ) : GQLDefinition {
+
+  override val children = directives + selectionSet + typeCondition
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       writeUtf8("fragment ")
@@ -69,7 +110,7 @@ data class GQLFragmentDefinition(
       writeUtf8(" ")
       directives.join(bufferedSink)
       writeUtf8(" ")
-      selections.join(bufferedSink, prefix = "{\n", separator = "\n", postfix = "\n}\n")
+      selectionSet.write(bufferedSink)
     }
   }
 }
@@ -80,6 +121,9 @@ data class GQLSchemaDefinition(
     val directives: List<GQLDirective>,
     val rootOperationTypeDefinitions: List<GQLOperationTypeDefinition>
 ) : GQLDefinition {
+
+  override val children = directives + rootOperationTypeDefinitions
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       if (description != null) writeUtf8("\"\"\"$description\"\"\"\n")
@@ -100,6 +144,9 @@ data class GQLInterfaceTypeDefinition(
     val directives: List<GQLDirective>,
     val fields: List<GQLFieldDefinition>
 ) : GQLTypeDefinition() {
+
+  override val children: List<GQLNode> = directives + fields
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       if (description != null) writeUtf8("\"\"\"$description\"\"\"\n")
@@ -119,6 +166,9 @@ data class GQLObjectTypeDefinition(
     val directives: List<GQLDirective>,
     val fields: List<GQLFieldDefinition>,
 ) : GQLTypeDefinition() {
+
+  override val children: List<GQLNode> = directives + fields
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       if (description != null) writeUtf8("\"\"\"$description\"\"\"\n")
@@ -140,6 +190,9 @@ data class GQLInputObjectTypeDefinition(
     val directives: List<GQLDirective>,
     val inputFields: List<GQLInputValueDefinition>
 ) : GQLTypeDefinition() {
+
+  override val children: List<GQLNode> = directives + inputFields
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       if (description != null) writeUtf8("\"\"\"$description\"\"\"\n")
@@ -156,6 +209,9 @@ data class GQLScalarTypeDefinition(
     override val name: String,
     val directives: List<GQLDirective>
 ) : GQLTypeDefinition() {
+
+  override val children = directives
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       if (description != null) writeUtf8("\"\"\"$description\"\"\"\n")
@@ -172,6 +228,9 @@ data class GQLEnumTypeDefinition(
     val directives: List<GQLDirective>,
     val enumValues: List<GQLEnumValueDefinition>
 ) : GQLTypeDefinition() {
+
+  override val children: List<GQLNode> = directives + enumValues
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       if (description != null) writeUtf8("\"\"\"$description\"\"\"\n")
@@ -189,6 +248,9 @@ data class GQLUnionTypeDefinition(
     val directives: List<GQLDirective>,
     val memberTypes: List<GQLNamedType>
 ) : GQLTypeDefinition() {
+
+  override val children: List<GQLNode> = directives + memberTypes
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       if (description != null) writeUtf8("\"\"\"$description\"\"\"\n")
@@ -208,6 +270,9 @@ data class GQLDirectiveDefinition(
     val repeatable: Boolean,
     val locations: List<GQLDirectiveLocation>
 ) : GQLDefinition {
+
+  override val children: List<GQLNode> = arguments
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       if (description != null) writeUtf8("\"\"\"$description\"\"\"\n")
@@ -226,6 +291,9 @@ data class GQLSchemaExtension(
     val directives: List<GQLDirective>,
     val operationTypesDefinition: List<GQLOperationTypeDefinition>
 ) : GQLDefinition, GQLTypeSystemExtension {
+
+  override val children = directives + operationTypesDefinition
+
   override fun write(bufferedSink: BufferedSink) {
     TODO("Not yet implemented")
   }
@@ -237,6 +305,9 @@ data class GQLEnumTypeExtension(
     val directives: List<GQLDirective>,
     val enumValues: List<GQLEnumValueDefinition>
 ) : GQLDefinition, GQLTypeExtension {
+
+  override val children: List<GQLNode> = directives + enumValues
+
   override fun write(bufferedSink: BufferedSink) {
     TODO("Not yet implemented")
   }
@@ -248,6 +319,9 @@ data class GQLObjectTypeExtension(
     val directives: List<GQLDirective>,
     val fields: List<GQLFieldDefinition>
 ) : GQLDefinition, GQLTypeExtension {
+
+  override val children: List<GQLNode> = directives + fields
+
   override fun write(bufferedSink: BufferedSink) {
     TODO("Not yet implemented")
   }
@@ -259,6 +333,9 @@ data class GQLInputObjectTypeExtension(
     val directives: List<GQLDirective>,
     val inputFields: List<GQLInputValueDefinition>
 ) : GQLDefinition, GQLTypeExtension {
+
+  override val children: List<GQLNode> = directives + inputFields
+
   override fun write(bufferedSink: BufferedSink) {
     TODO("Not yet implemented")
   }
@@ -269,6 +346,9 @@ data class GQLScalarTypeExtension(
     override val name: String,
     val directives: List<GQLDirective>
 ) : GQLDefinition, GQLTypeExtension {
+
+  override val children = directives
+
   override fun write(bufferedSink: BufferedSink) {
     TODO("Not yet implemented")
   }
@@ -279,6 +359,9 @@ data class GQLInterfaceTypeExtension(
     override val name: String,
     val fields: List<GQLFieldDefinition>
 ) : GQLDefinition, GQLTypeExtension, GQLNamed {
+
+  override val children = fields
+
   override fun write(bufferedSink: BufferedSink) {
     TODO("Not yet implemented")
   }
@@ -290,6 +373,9 @@ data class GQLUnionTypeExtension(
     val directives: List<GQLDirective>,
     val memberTypes: List<GQLNamedType>
 ) : GQLDefinition, GQLTypeExtension {
+
+  override val children: List<GQLNode> = directives + memberTypes
+
   override fun write(bufferedSink: BufferedSink) {
     TODO("Not yet implemented")
   }
@@ -301,6 +387,9 @@ data class GQLEnumValueDefinition(
     override val name: String,
     val directives: List<GQLDirective>
 ) : GQLNode, GQLNamed {
+
+  override val children = directives
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       if (description != null) writeUtf8("\"\"\"$description\"\"\"\n")
@@ -318,6 +407,9 @@ data class GQLFieldDefinition(
     val type: GQLType,
     val directives: List<GQLDirective>
 ) : GQLNode, GQLNamed {
+
+  override val children: List<GQLNode> = directives + arguments
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       if (description != null) writeUtf8("\"\"\"$description\"\"\"\n")
@@ -338,6 +430,9 @@ data class GQLInputValueDefinition(
     val type: GQLType,
     val defaultValue: GQLValue?
 ) : GQLNode, GQLNamed {
+
+  override val children = directives
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       if (description != null) writeUtf8("\"\"\"$description\"\"\" ")
@@ -360,6 +455,13 @@ data class GQLVariableDefinition(
     val defaultValue: GQLValue?,
     //val directives: List<GQLDirective>
 ) : GQLNode {
+
+  override val children = mutableListOf<GQLNode>().apply {
+    if (defaultValue != null) {
+      add(defaultValue)
+    }
+  }
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       writeUtf8("${'$'}$name: ")
@@ -380,6 +482,9 @@ data class GQLOperationTypeDefinition(
     val operationType: String,
     val namedType: String
 ) : GQLNode {
+
+  override val children = emptyList<GQLNode>()
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       writeUtf8("$operationType: $namedType")
@@ -392,6 +497,9 @@ data class GQLDirective(
     override val name: String,
     val arguments: List<GQLArgument>
 ) : GQLNode, GQLNamed {
+
+  override val children = arguments
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       writeUtf8("@$name")
@@ -405,6 +513,9 @@ data class GQLObjectField(
     val name: String,
     val value: GQLValue
 ) : GQLNode {
+
+  override val children = listOf(value)
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       writeUtf8("$name: ")
@@ -418,11 +529,25 @@ data class GQLArgument(
     val name: String,
     val value: GQLValue
 ) : GQLNode {
+
+  override val children = listOf(value)
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       writeUtf8("$name: ")
       value.write(bufferedSink)
     }
+  }
+}
+
+data class GQLSelectionSet(
+    val selections: List<GQLSelection>,
+    override val sourceLocation: SourceLocation = SourceLocation.UNKNOWN
+): GQLNode {
+  override val children = selections
+
+  override fun write(bufferedSink: BufferedSink) {
+    selections.join(bufferedSink, prefix = "{\n", separator = "\n", postfix = "\n}")
   }
 }
 
@@ -432,8 +557,15 @@ data class GQLField(
     val name: String,
     val arguments: List<GQLArgument>,
     val directives: List<GQLDirective>,
-    val selections: List<GQLSelection>
-) : GQLSelection {
+    val selectionSet: GQLSelectionSet?
+) : GQLSelection() {
+
+  override val children: List<GQLNode> = (arguments + directives).toMutableList().apply {
+    if (selectionSet != null) {
+      add(selectionSet)
+    }
+  }
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       if (alias != null) {
@@ -443,7 +575,7 @@ data class GQLField(
       arguments.join(bufferedSink, prefix = "(", separator = ", ", postfix = ")")
       writeUtf8(" ")
       directives.join(bufferedSink)
-      selections.join(bufferedSink, prefix = "{\n", separator = "\n", postfix = "\n}")
+      selectionSet?.write(bufferedSink)
     }
   }
 }
@@ -452,13 +584,16 @@ data class GQLInlineFragment(
     override val sourceLocation: SourceLocation = SourceLocation.UNKNOWN,
     val typeCondition: GQLNamedType,
     val directives: List<GQLDirective>,
-    val selections: List<GQLSelection>
-) : GQLSelection {
+    val selectionSet: GQLSelectionSet
+) : GQLSelection() {
+
+  override val children = directives + selectionSet + typeCondition
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       writeUtf8("... on ${typeCondition.name} ")
       directives.join(bufferedSink)
-      selections.join(bufferedSink, prefix = "{\n", separator = "\n", postfix = "\n}")
+      selectionSet.write(bufferedSink)
     }
   }
 }
@@ -467,7 +602,10 @@ data class GQLFragmentSpread(
     override val sourceLocation: SourceLocation = SourceLocation.UNKNOWN,
     val name: String,
     val directives: List<GQLDirective>
-) : GQLSelection {
+) : GQLSelection() {
+
+  override val children = directives
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       writeUtf8("...${name} ")
@@ -481,6 +619,9 @@ data class GQLNamedType(
     override val sourceLocation: SourceLocation = SourceLocation.UNKNOWN,
     override val name: String
 ) : GQLType(), GQLNamed {
+
+  override val children = emptyList<GQLNode>()
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       writeUtf8(name)
@@ -492,6 +633,9 @@ data class GQLNonNullType(
     override val sourceLocation: SourceLocation = SourceLocation.UNKNOWN,
     val type: GQLType
 ) : GQLType() {
+
+  override val children = listOf(type)
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       type.write(bufferedSink)
@@ -504,6 +648,9 @@ data class GQLListType(
     override val sourceLocation: SourceLocation = SourceLocation.UNKNOWN,
     val type: GQLType
 ) : GQLType() {
+
+  override val children = listOf(type)
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       writeUtf8("[")
@@ -519,6 +666,9 @@ data class GQLVariableValue(
     override val sourceLocation: SourceLocation = SourceLocation.UNKNOWN,
     val name: String
 ) : GQLValue() {
+
+  override val children = emptyList<GQLNode>()
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       writeUtf8("${'$'}$name")
@@ -530,6 +680,9 @@ data class GQLIntValue(
     override val sourceLocation: SourceLocation = SourceLocation.UNKNOWN,
     val value: Int
 ) : GQLValue() {
+
+  override val children = emptyList<GQLNode>()
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       writeUtf8(value.toString())
@@ -541,6 +694,9 @@ data class GQLFloatValue(
     override val sourceLocation: SourceLocation = SourceLocation.UNKNOWN,
     val value: Double
 ) : GQLValue() {
+
+  override val children = emptyList<GQLNode>()
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       writeUtf8(value.toString())
@@ -552,6 +708,9 @@ data class GQLStringValue(
     override val sourceLocation: SourceLocation = SourceLocation.UNKNOWN,
     val value: String
 ) : GQLValue() {
+
+  override val children = emptyList<GQLNode>()
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       writeUtf8("\"$value\"")
@@ -563,6 +722,9 @@ data class GQLBooleanValue(
     override val sourceLocation: SourceLocation = SourceLocation.UNKNOWN,
     val value: Boolean
 ) : GQLValue() {
+
+  override val children = emptyList<GQLNode>()
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       writeUtf8(value.toString())
@@ -574,6 +736,9 @@ data class GQLEnumValue(
     override val sourceLocation: SourceLocation = SourceLocation.UNKNOWN,
     val value: String
 ) : GQLValue() {
+
+  override val children = emptyList<GQLNode>()
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       writeUtf8(value)
@@ -585,6 +750,9 @@ data class GQLListValue(
     override val sourceLocation: SourceLocation = SourceLocation.UNKNOWN,
     val values: List<GQLValue>
 ) : GQLValue() {
+
+  override val children = values
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       writeUtf8("[")
@@ -599,6 +767,9 @@ data class GQLObjectValue(
     override val sourceLocation: SourceLocation = SourceLocation.UNKNOWN,
     val fields: List<GQLObjectField>
 ) : GQLValue() {
+
+  override val children = fields
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       writeUtf8("{\n")
@@ -609,6 +780,9 @@ data class GQLObjectValue(
 }
 
 data class GQLNullValue(override val sourceLocation: SourceLocation = SourceLocation.UNKNOWN) : GQLValue() {
+
+  override val children = emptyList<GQLNode>()
+
   override fun write(bufferedSink: BufferedSink) {
     with(bufferedSink) {
       writeUtf8("null")

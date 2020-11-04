@@ -14,7 +14,7 @@ import com.apollographql.apollo.compiler.parser.error.ParseException
 import com.apollographql.apollo.compiler.parser.graphql.DocumentParseResult
 import com.apollographql.apollo.compiler.parser.graphql.GraphQLDocumentParser
 import com.apollographql.apollo.compiler.parser.graphql.ast.GQLDocument
-import com.apollographql.apollo.compiler.parser.graphql.ast.fromFile
+import com.apollographql.apollo.compiler.parser.graphql.ast.parseAsSchema
 import com.apollographql.apollo.compiler.parser.introspection.IntrospectionSchema
 import com.apollographql.apollo.compiler.parser.introspection.IntrospectionSchema.Companion.toIntrospectionSchema
 import com.apollographql.apollo.compiler.parser.introspection.IntrospectionSchema.Companion.wrap
@@ -217,7 +217,7 @@ class GraphQLCompiler(val logger: Logger = NoOpLogger) {
           IntrospectionSchema(schemaFile)
         } else {
           try {
-            GQLDocument.fromFile(schemaFile).toIntrospectionSchema()
+            GQLDocument.parseAsSchema(schemaFile).toIntrospectionSchema()
           } catch (e: ParseException) {
             throw DocumentParseException(e, schemaFile.absolutePath)
           }
