@@ -21,3 +21,9 @@ fragment RepositoryFragment on Repository {
   name
   description
 }
+
+mutation deleteBranch($input: DeleteBranchProtectionRuleInput!) {
+	deleteBranchProtectionRule(input: $input) {
+		clientMutationId
+	}
+}

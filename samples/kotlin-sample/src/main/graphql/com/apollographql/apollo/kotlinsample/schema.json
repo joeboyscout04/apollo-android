@@ -45440,7 +45440,7 @@
                 "name": "String",
                 "ofType": null
               },
-              "defaultValue": null
+              "defaultValue": "\"Me\""
             }
           ],
           "interfaces": null,
